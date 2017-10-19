@@ -533,9 +533,6 @@ L.Mixin.Events.fire = L.Mixin.Events.fireEvent;
 	    opera3d = 'OTransition' in doc.style,
 	    any3d = !window.L_DISABLE_3D && (ie3d || webkit3d || gecko3d || opera3d) && !phantomjs;
 
-	var touch = !window.L_NO_TOUCH && !phantomjs && (pointer || 'ontouchstart' in window ||
-		(window.DocumentTouch && document instanceof window.DocumentTouch));
-
 	L.Browser = {
 		ie: ie,
 		ielt9: ielt9,
@@ -558,7 +555,7 @@ L.Mixin.Events.fire = L.Mixin.Events.fireEvent;
 		mobileWebkit3d: mobile && webkit3d,
 		mobileOpera: mobile && window.opera,
 
-		touch: touch,
+		touch: false,
 		msPointer: msPointer,
 		pointer: pointer,
 
@@ -1988,7 +1985,6 @@ L.Map = L.Class.extend({
 		var container = this._container;
 
 		L.DomUtil.addClass(container, 'leaflet-container' +
-			(L.Browser.touch ? ' leaflet-touch' : '') +
 			(L.Browser.retina ? ' leaflet-retina' : '') +
 			(L.Browser.ielt9 ? ' leaflet-oldie' : '') +
 			(this.options.fadeAnimation ? ' leaflet-fade-anim' : ''));
@@ -5997,10 +5993,6 @@ L.Polyline.include(!L.Path.CANVAS ? {} : {
 		var i, j, k, len, len2, dist, part,
 		    w = this.options.weight / 2;
 
-		if (L.Browser.touch) {
-			w += 10; // polyline click tolerance on touch devices
-		}
-
 		for (i = 0, len = this._parts.length; i < len; i++) {
 			part = this._parts[i];
 			for (j = 0, len2 = part.length, k = len2 - 1; j < len2; k = j++) {
@@ -6399,9 +6391,6 @@ L.DomEvent = {
 		if (L.Browser.pointer && type.indexOf('touch') === 0) {
 			return this.addPointerListener(obj, type, handler, id);
 		}
-		if (L.Browser.touch && (type === 'dblclick') && this.addDoubleTapListener) {
-			this.addDoubleTapListener(obj, handler, id);
-		}
 
 		if ('addEventListener' in obj) {
 
@@ -6451,9 +6440,6 @@ L.DomEvent = {
 
 		if (L.Browser.pointer && type.indexOf('touch') === 0) {
 			this.removePointerListener(obj, type, id);
-		} else if (L.Browser.touch && (type === 'dblclick') && this.removeDoubleTapListener) {
-			this.removeDoubleTapListener(obj, id);
-
 		} else if ('removeEventListener' in obj) {
 
 			if (type === 'mousewheel') {
@@ -6626,18 +6612,12 @@ L.Draggable = L.Class.extend({
 	includes: L.Mixin.Events,
 
 	statics: {
-		START: L.Browser.touch ? ['touchstart', 'mousedown'] : ['mousedown'],
+		START: ['mousedown'],
 		END: {
-			mousedown: 'mouseup',
-			touchstart: 'touchend',
-			pointerdown: 'touchend',
-			MSPointerDown: 'touchend'
+			mousedown: 'mouseup'
 		},
 		MOVE: {
-			mousedown: 'mousemove',
-			touchstart: 'touchmove',
-			pointerdown: 'touchmove',
-			MSPointerDown: 'touchmove'
+			mousedown: 'mousemove'
 		}
 	},
 
@@ -6702,7 +6682,6 @@ L.Draggable = L.Class.extend({
 		    offset = newPoint.subtract(this._startPoint);
 
 		if (!offset.x && !offset.y) { return; }
-		if (L.Browser.touch && Math.abs(offset.x) + Math.abs(offset.y) < 3) { return; }
 
 		L.DomEvent.preventDefault(e);
 
@@ -6801,7 +6780,7 @@ L.Map.mergeOptions({
 	inertia: !L.Browser.android23,
 	inertiaDeceleration: 3400, // px/s^2
 	inertiaMaxSpeed: Infinity, // px/s
-	inertiaThreshold: L.Browser.touch ? 32 : 18, // ms
+	inertiaThreshold: 18, // ms
 	easeLinearity: 0.25,
 
 	// TODO refactor, move to CRS
@@ -7039,508 +7018,6 @@ L.Map.ScrollWheelZoom = L.Handler.extend({
 });
 
 L.Map.addInitHook('addHandler', 'scrollWheelZoom', L.Map.ScrollWheelZoom);
-
-
-/*
- * Extends the event handling code with double tap support for mobile browsers.
- */
-
-L.extend(L.DomEvent, {
-
-	_touchstart: L.Browser.msPointer ? 'MSPointerDown' : L.Browser.pointer ? 'pointerdown' : 'touchstart',
-	_touchend: L.Browser.msPointer ? 'MSPointerUp' : L.Browser.pointer ? 'pointerup' : 'touchend',
-
-	// inspired by Zepto touch code by Thomas Fuchs
-	addDoubleTapListener: function (obj, handler, id) {
-		var last,
-		    doubleTap = false,
-		    delay = 250,
-		    touch,
-		    pre = '_leaflet_',
-		    touchstart = this._touchstart,
-		    touchend = this._touchend,
-		    trackedTouches = [];
-
-		function onTouchStart(e) {
-			var count;
-
-			if (L.Browser.pointer) {
-				trackedTouches.push(e.pointerId);
-				count = trackedTouches.length;
-			} else {
-				count = e.touches.length;
-			}
-			if (count > 1) {
-				return;
-			}
-
-			var now = Date.now(),
-				delta = now - (last || now);
-
-			touch = e.touches ? e.touches[0] : e;
-			doubleTap = (delta > 0 && delta <= delay);
-			last = now;
-		}
-
-		function onTouchEnd(e) {
-			if (L.Browser.pointer) {
-				var idx = trackedTouches.indexOf(e.pointerId);
-				if (idx === -1) {
-					return;
-				}
-				trackedTouches.splice(idx, 1);
-			}
-
-			if (doubleTap) {
-				if (L.Browser.pointer) {
-					// work around .type being readonly with MSPointer* events
-					var newTouch = { },
-						prop;
-
-					// jshint forin:false
-					for (var i in touch) {
-						prop = touch[i];
-						if (typeof prop === 'function') {
-							newTouch[i] = prop.bind(touch);
-						} else {
-							newTouch[i] = prop;
-						}
-					}
-					touch = newTouch;
-				}
-				touch.type = 'dblclick';
-				handler(touch);
-				last = null;
-			}
-		}
-		obj[pre + touchstart + id] = onTouchStart;
-		obj[pre + touchend + id] = onTouchEnd;
-
-		// on pointer we need to listen on the document, otherwise a drag starting on the map and moving off screen
-		// will not come through to us, so we will lose track of how many touches are ongoing
-		var endElement = L.Browser.pointer ? document.documentElement : obj;
-
-		obj.addEventListener(touchstart, onTouchStart, false);
-		endElement.addEventListener(touchend, onTouchEnd, false);
-
-		if (L.Browser.pointer) {
-			endElement.addEventListener(L.DomEvent.POINTER_CANCEL, onTouchEnd, false);
-		}
-
-		return this;
-	},
-
-	removeDoubleTapListener: function (obj, id) {
-		var pre = '_leaflet_';
-
-		obj.removeEventListener(this._touchstart, obj[pre + this._touchstart + id], false);
-		(L.Browser.pointer ? document.documentElement : obj).removeEventListener(
-		        this._touchend, obj[pre + this._touchend + id], false);
-
-		if (L.Browser.pointer) {
-			document.documentElement.removeEventListener(L.DomEvent.POINTER_CANCEL, obj[pre + this._touchend + id],
-				false);
-		}
-
-		return this;
-	}
-});
-
-
-/*
- * Extends L.DomEvent to provide touch support for Internet Explorer and Windows-based devices.
- */
-
-L.extend(L.DomEvent, {
-
-	//static
-	POINTER_DOWN: L.Browser.msPointer ? 'MSPointerDown' : 'pointerdown',
-	POINTER_MOVE: L.Browser.msPointer ? 'MSPointerMove' : 'pointermove',
-	POINTER_UP: L.Browser.msPointer ? 'MSPointerUp' : 'pointerup',
-	POINTER_CANCEL: L.Browser.msPointer ? 'MSPointerCancel' : 'pointercancel',
-
-	_pointers: [],
-	_pointerDocumentListener: false,
-
-	// Provides a touch events wrapper for (ms)pointer events.
-	// Based on changes by veproza https://github.com/CloudMade/Leaflet/pull/1019
-	//ref http://www.w3.org/TR/pointerevents/ https://www.w3.org/Bugs/Public/show_bug.cgi?id=22890
-
-	addPointerListener: function (obj, type, handler, id) {
-
-		switch (type) {
-		case 'touchstart':
-			return this.addPointerListenerStart(obj, type, handler, id);
-		case 'touchend':
-			return this.addPointerListenerEnd(obj, type, handler, id);
-		case 'touchmove':
-			return this.addPointerListenerMove(obj, type, handler, id);
-		default:
-			throw 'Unknown touch event type';
-		}
-	},
-
-	addPointerListenerStart: function (obj, type, handler, id) {
-		var pre = '_leaflet_',
-		    pointers = this._pointers;
-
-		var cb = function (e) {
-			if (e.pointerType !== 'mouse' && e.pointerType !== e.MSPOINTER_TYPE_MOUSE) {
-				L.DomEvent.preventDefault(e);
-			}
-
-			var alreadyInArray = false;
-			for (var i = 0; i < pointers.length; i++) {
-				if (pointers[i].pointerId === e.pointerId) {
-					alreadyInArray = true;
-					break;
-				}
-			}
-			if (!alreadyInArray) {
-				pointers.push(e);
-			}
-
-			e.touches = pointers.slice();
-			e.changedTouches = [e];
-
-			handler(e);
-		};
-
-		obj[pre + 'touchstart' + id] = cb;
-		obj.addEventListener(this.POINTER_DOWN, cb, false);
-
-		// need to also listen for end events to keep the _pointers list accurate
-		// this needs to be on the body and never go away
-		if (!this._pointerDocumentListener) {
-			var internalCb = function (e) {
-				for (var i = 0; i < pointers.length; i++) {
-					if (pointers[i].pointerId === e.pointerId) {
-						pointers.splice(i, 1);
-						break;
-					}
-				}
-			};
-			//We listen on the documentElement as any drags that end by moving the touch off the screen get fired there
-			document.documentElement.addEventListener(this.POINTER_UP, internalCb, false);
-			document.documentElement.addEventListener(this.POINTER_CANCEL, internalCb, false);
-
-			this._pointerDocumentListener = true;
-		}
-
-		return this;
-	},
-
-	addPointerListenerMove: function (obj, type, handler, id) {
-		var pre = '_leaflet_',
-		    touches = this._pointers;
-
-		function cb(e) {
-
-			// don't fire touch moves when mouse isn't down
-			if ((e.pointerType === e.MSPOINTER_TYPE_MOUSE || e.pointerType === 'mouse') && e.buttons === 0) { return; }
-
-			for (var i = 0; i < touches.length; i++) {
-				if (touches[i].pointerId === e.pointerId) {
-					touches[i] = e;
-					break;
-				}
-			}
-
-			e.touches = touches.slice();
-			e.changedTouches = [e];
-
-			handler(e);
-		}
-
-		obj[pre + 'touchmove' + id] = cb;
-		obj.addEventListener(this.POINTER_MOVE, cb, false);
-
-		return this;
-	},
-
-	addPointerListenerEnd: function (obj, type, handler, id) {
-		var pre = '_leaflet_',
-		    touches = this._pointers;
-
-		var cb = function (e) {
-			for (var i = 0; i < touches.length; i++) {
-				if (touches[i].pointerId === e.pointerId) {
-					touches.splice(i, 1);
-					break;
-				}
-			}
-
-			e.touches = touches.slice();
-			e.changedTouches = [e];
-
-			handler(e);
-		};
-
-		obj[pre + 'touchend' + id] = cb;
-		obj.addEventListener(this.POINTER_UP, cb, false);
-		obj.addEventListener(this.POINTER_CANCEL, cb, false);
-
-		return this;
-	},
-
-	removePointerListener: function (obj, type, id) {
-		var pre = '_leaflet_',
-		    cb = obj[pre + type + id];
-
-		switch (type) {
-		case 'touchstart':
-			obj.removeEventListener(this.POINTER_DOWN, cb, false);
-			break;
-		case 'touchmove':
-			obj.removeEventListener(this.POINTER_MOVE, cb, false);
-			break;
-		case 'touchend':
-			obj.removeEventListener(this.POINTER_UP, cb, false);
-			obj.removeEventListener(this.POINTER_CANCEL, cb, false);
-			break;
-		}
-
-		return this;
-	}
-});
-
-
-/*
- * L.Handler.TouchZoom is used by L.Map to add pinch zoom on supported mobile browsers.
- */
-
-L.Map.mergeOptions({
-	touchZoom: L.Browser.touch && !L.Browser.android23,
-	bounceAtZoomLimits: true
-});
-
-L.Map.TouchZoom = L.Handler.extend({
-	addHooks: function () {
-		L.DomEvent.on(this._map._container, 'touchstart', this._onTouchStart, this);
-	},
-
-	removeHooks: function () {
-		L.DomEvent.off(this._map._container, 'touchstart', this._onTouchStart, this);
-	},
-
-	_onTouchStart: function (e) {
-		var map = this._map;
-
-		if (!e.touches || e.touches.length !== 2 || map._animatingZoom || this._zooming) { return; }
-
-		var p1 = map.mouseEventToLayerPoint(e.touches[0]),
-		    p2 = map.mouseEventToLayerPoint(e.touches[1]),
-		    viewCenter = map._getCenterLayerPoint();
-
-		this._startCenter = p1.add(p2)._divideBy(2);
-		this._startDist = p1.distanceTo(p2);
-
-		this._moved = false;
-		this._zooming = true;
-
-		this._centerOffset = viewCenter.subtract(this._startCenter);
-
-		if (map._panAnim) {
-			map._panAnim.stop();
-		}
-
-		L.DomEvent
-		    .on(document, 'touchmove', this._onTouchMove, this)
-		    .on(document, 'touchend', this._onTouchEnd, this);
-
-		L.DomEvent.preventDefault(e);
-	},
-
-	_onTouchMove: function (e) {
-		var map = this._map;
-
-		if (!e.touches || e.touches.length !== 2 || !this._zooming) { return; }
-
-		var p1 = map.mouseEventToLayerPoint(e.touches[0]),
-		    p2 = map.mouseEventToLayerPoint(e.touches[1]);
-
-		this._scale = p1.distanceTo(p2) / this._startDist;
-		this._delta = p1._add(p2)._divideBy(2)._subtract(this._startCenter);
-
-		if (this._scale === 1) { return; }
-
-		if (!map.options.bounceAtZoomLimits) {
-			if ((map.getZoom() === map.getMinZoom() && this._scale < 1) ||
-			    (map.getZoom() === map.getMaxZoom() && this._scale > 1)) { return; }
-		}
-
-		if (!this._moved) {
-			L.DomUtil.addClass(map._mapPane, 'leaflet-touching');
-
-			map
-			    .fire('movestart')
-			    .fire('zoomstart');
-
-			this._moved = true;
-		}
-
-		L.Util.cancelAnimFrame(this._animRequest);
-		this._animRequest = L.Util.requestAnimFrame(
-		        this._updateOnMove, this, true, this._map._container);
-
-		L.DomEvent.preventDefault(e);
-	},
-
-	_updateOnMove: function () {
-		var map = this._map,
-		    origin = this._getScaleOrigin(),
-		    center = map.layerPointToLatLng(origin),
-		    zoom = map.getScaleZoom(this._scale);
-
-		map._animateZoom(center, zoom, this._startCenter, this._scale, this._delta, false, true);
-	},
-
-	_onTouchEnd: function () {
-		if (!this._moved || !this._zooming) {
-			this._zooming = false;
-			return;
-		}
-
-		var map = this._map;
-
-		this._zooming = false;
-		L.DomUtil.removeClass(map._mapPane, 'leaflet-touching');
-		L.Util.cancelAnimFrame(this._animRequest);
-
-		L.DomEvent
-		    .off(document, 'touchmove', this._onTouchMove)
-		    .off(document, 'touchend', this._onTouchEnd);
-
-		var origin = this._getScaleOrigin(),
-		    center = map.layerPointToLatLng(origin),
-
-		    oldZoom = map.getZoom(),
-		    floatZoomDelta = map.getScaleZoom(this._scale) - oldZoom,
-		    roundZoomDelta = (floatZoomDelta > 0 ?
-		            Math.ceil(floatZoomDelta) : Math.floor(floatZoomDelta)),
-
-		    zoom = map._limitZoom(oldZoom + roundZoomDelta),
-		    scale = map.getZoomScale(zoom) / this._scale;
-
-		map._animateZoom(center, zoom, origin, scale);
-	},
-
-	_getScaleOrigin: function () {
-		var centerOffset = this._centerOffset.subtract(this._delta).divideBy(this._scale);
-		return this._startCenter.add(centerOffset);
-	}
-});
-
-L.Map.addInitHook('addHandler', 'touchZoom', L.Map.TouchZoom);
-
-
-/*
- * L.Map.Tap is used to enable mobile hacks like quick taps and long hold.
- */
-
-L.Map.mergeOptions({
-	tap: true,
-	tapTolerance: 15
-});
-
-L.Map.Tap = L.Handler.extend({
-	addHooks: function () {
-		L.DomEvent.on(this._map._container, 'touchstart', this._onDown, this);
-	},
-
-	removeHooks: function () {
-		L.DomEvent.off(this._map._container, 'touchstart', this._onDown, this);
-	},
-
-	_onDown: function (e) {
-		if (!e.touches) { return; }
-
-		L.DomEvent.preventDefault(e);
-
-		this._fireClick = true;
-
-		// don't simulate click or track longpress if more than 1 touch
-		if (e.touches.length > 1) {
-			this._fireClick = false;
-			clearTimeout(this._holdTimeout);
-			return;
-		}
-
-		var first = e.touches[0],
-		    el = first.target;
-
-		this._startPos = this._newPos = new L.Point(first.clientX, first.clientY);
-
-		// if touching a link, highlight it
-		if (el.tagName && el.tagName.toLowerCase() === 'a') {
-			L.DomUtil.addClass(el, 'leaflet-active');
-		}
-
-		// simulate long hold but setting a timeout
-		this._holdTimeout = setTimeout(L.bind(function () {
-			if (this._isTapValid()) {
-				this._fireClick = false;
-				this._onUp();
-				this._simulateEvent('contextmenu', first);
-			}
-		}, this), 1000);
-
-		L.DomEvent
-			.on(document, 'touchmove', this._onMove, this)
-			.on(document, 'touchend', this._onUp, this);
-	},
-
-	_onUp: function (e) {
-		clearTimeout(this._holdTimeout);
-
-		L.DomEvent
-			.off(document, 'touchmove', this._onMove, this)
-			.off(document, 'touchend', this._onUp, this);
-
-		if (this._fireClick && e && e.changedTouches) {
-
-			var first = e.changedTouches[0],
-			    el = first.target;
-
-			if (el && el.tagName && el.tagName.toLowerCase() === 'a') {
-				L.DomUtil.removeClass(el, 'leaflet-active');
-			}
-
-			// simulate click if the touch didn't move too much
-			if (this._isTapValid()) {
-				this._simulateEvent('click', first);
-			}
-		}
-	},
-
-	_isTapValid: function () {
-		return this._newPos.distanceTo(this._startPos) <= this._map.options.tapTolerance;
-	},
-
-	_onMove: function (e) {
-		var first = e.touches[0];
-		this._newPos = new L.Point(first.clientX, first.clientY);
-	},
-
-	_simulateEvent: function (type, e) {
-		var simulatedEvent = document.createEvent('MouseEvents');
-
-		simulatedEvent._simulated = true;
-		e.target._simulatedClick = true;
-
-		simulatedEvent.initMouseEvent(
-		        type, true, true, window, 1,
-		        e.screenX, e.screenY,
-		        e.clientX, e.clientY,
-		        false, false, false, false, 0, null);
-
-		e.target.dispatchEvent(simulatedEvent);
-	}
-});
-
-if (L.Browser.touch && !L.Browser.pointer) {
-	L.Map.addInitHook('addHandler', 'tap', L.Map.Tap);
-}
 
 
 /*
@@ -8407,13 +7884,9 @@ L.Control.Layers = L.Control.extend({
 		//Makes this work on IE10 Touch devices by stopping it from firing a mouseout event when the touch is released
 		container.setAttribute('aria-haspopup', true);
 
-		if (!L.Browser.touch) {
-			L.DomEvent
-				.disableClickPropagation(container)
-				.disableScrollPropagation(container);
-		} else {
-			L.DomEvent.on(container, 'click', L.DomEvent.stopPropagation);
-		}
+		L.DomEvent
+			.disableClickPropagation(container)
+			.disableScrollPropagation(container);
 
 		var form = this._form = L.DomUtil.create('form', className + '-list');
 
@@ -8427,14 +7900,8 @@ L.Control.Layers = L.Control.extend({
 			link.href = '#';
 			link.title = 'Layers';
 
-			if (L.Browser.touch) {
-				L.DomEvent
-				    .on(link, 'click', L.DomEvent.stop)
-				    .on(link, 'click', this._expand, this);
-			}
-			else {
-				L.DomEvent.on(link, 'focus', this._expand, this);
-			}
+			L.DomEvent.on(link, 'focus', this._expand, this);
+
 			//Work around for Firefox android issue https://github.com/Leaflet/Leaflet/issues/2033
 			L.DomEvent.on(form, 'click', function () {
 				setTimeout(L.bind(this._onInputClick, this), 0);
@@ -8919,11 +8386,7 @@ L.Map.include(!L.DomUtil.TRANSITION ? {} : {
 		return true;
 	},
 
-	_animateZoom: function (center, zoom, origin, scale, delta, backwards, forTouchZoom) {
-
-		if (!forTouchZoom) {
-			this._animatingZoom = true;
-		}
+	_animateZoom: function (center, zoom, origin, scale, delta, backwards) {
 
 		// put transform transition on all layers with leaflet-zoom-animated class
 		L.DomUtil.addClass(this._mapPane, 'leaflet-zoom-anim');
@@ -9011,7 +8474,7 @@ L.TileLayer.include({
 	_clearBgBuffer: function () {
 		var map = this._map;
 
-		if (map && !map._animatingZoom && !map.touchZoom._zooming) {
+		if (map && !map._animatingZoom) {
 			this._bgBuffer.innerHTML = '';
 			this._bgBuffer.style[L.DomUtil.TRANSFORM] = '';
 		}
