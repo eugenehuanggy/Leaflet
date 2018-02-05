@@ -84,6 +84,10 @@ export var Tooltip = DivOverlay.extend({
 			// Fired when a tooltip bound to this layer is opened.
 			this._source.fire('tooltipopen', {tooltip: this}, true);
 		}
+
+		if (this.options.permanent) {
+			map.on('zoomend', this._zoomEnd, this);
+		}
 	},
 
 	onRemove: function (map) {
@@ -101,6 +105,10 @@ export var Tooltip = DivOverlay.extend({
 			// @event tooltipclose: TooltipEvent
 			// Fired when a tooltip bound to this layer is closed.
 			this._source.fire('tooltipclose', {tooltip: this}, true);
+		}
+
+		if (this.options.permanent) {
+			map.off('zoomend', this._zoomEnd, this);
 		}
 	},
 
@@ -185,8 +193,14 @@ export var Tooltip = DivOverlay.extend({
 	_getAnchor: function () {
 		// Where should we anchor the tooltip on the source layer?
 		return toPoint(this._source && this._source._getTooltipAnchor && !this.options.sticky ? this._source._getTooltipAnchor() : [0, 0]);
-	}
+	},
 
+	_zoomEnd: function () {
+		if (this._source) {
+			var layer = this._source;
+			this._latlng = layer.getCenter ? layer.getCenter() : layer.getLatLng();
+		}
+	}
 });
 
 // @namespace Tooltip
